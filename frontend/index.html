@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chat Radiologia – MVP</title>
+
+  <!-- Tipografia mais redonda/limpa -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <!-- Nosso CSS externo -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="dot" title="Servidor online"></div>
+      <div>
+        <h1>DeuChat</h1>
+        <span>Se for o lucão, use com moderação!</span>
+      </div>
+    </header>
+
+    <div class="card">
+  <div id="chat" class="chat" aria-live="polite"></div>
+
+  <div class="composer">
+    <textarea id="input" placeholder="Digite sua pergunta… (Shift+Enter para quebra de linha)"></textarea>
+    <button id="send" class="send">Enviar</button>
+  </div>
+</div>
+
+
+  <script src="scripts.js" defer></script>
+</body>
+</html>

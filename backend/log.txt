@@ -1,0 +1,1 @@
+2025-11-08 18:45:31,277 - Collection rag100 is not created.

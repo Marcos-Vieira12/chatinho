@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+openai
+python-dotenv>=1.0.1
+tqdm>=4.66.0
+langdetect
+chromadb 
+openai>=1.2.0
+pypdf
+deep-translator
+numpy<2.0
+requests
+pymed
