@@ -1,6 +1,8 @@
+import traceback
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 import subprocess, shlex
 from pathlib import Path
 from backend.cloud_rag_cli import ask as rag_ask
