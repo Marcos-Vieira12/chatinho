@@ -8,6 +8,19 @@ from backend.cloud_rag_cli import ask as rag_ask
 # --------------------------------------------------------------------
 app = FastAPI(title="DeuChat - RAG Local + Frontend")
 
+origins = [
+    "https://chatinho-6c7o.onrender.com",  # seu frontend hospedado
+    "http://localhost:5173",                # opcional, para testes locais
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # --------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
