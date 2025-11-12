@@ -12,6 +12,7 @@ app = FastAPI(title="DeuChat - RAG Local + Frontend")
 
 origins = [
     "https://chatinho-6c7o.onrender.com",  # seu frontend hospedado
+    "https://www.chatinho-6c7o.onrender.com",  # seu frontend hospedado    
     "http://localhost:5173",                # opcional, para testes locais
 ]
 

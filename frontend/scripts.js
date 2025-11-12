@@ -5,7 +5,7 @@ const sendBtn = $('#send');
 const AVATAR_SRC = 'mascote.png';
 
 // API: prod vs dev
-const PROD_API = "https://chat-deulaudo.onrender.com/ask";
+const PROD_API = "https://chatinho-6c7o.onrender.com/ask";
 const DEV_API  = "http://127.0.0.1:8000/ask";           
 const API_URL  = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
   ? DEV_API : PROD_API;
