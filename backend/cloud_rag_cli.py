@@ -36,10 +36,11 @@ from deep_translator import GoogleTranslator
 dotenv_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=dotenv_path, override=True)
 
-DEFAULT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+DEFAULT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini")
 DEFAULT_VS_NAME = os.getenv("VECTOR_STORE_NAME", "rag_local")
 DEFAULT_DOCS_DIR = os.getenv("DOCS_DIR", "./docs")
 LOCAL_BASE = Path("rag_store")
+CHAT_HISTORY = []
 
 API_KEY = os.getenv("OPENAI_API_KEY")
 if not API_KEY:
@@ -84,7 +85,7 @@ def chunk_text(text: str, max_chars: int = 1000):
     return [text[i:i+max_chars] for i in range(0, len(text), max_chars)]
 
 def auto_translate(text: str, target_lang: str = "en"):
-    """Traduz texto PT↔EN via Google Translate (via deep-translator)."""
+    """Traduz texto PT↔EN via Google Translate (deep-translator)."""
     try:
         if target_lang == "en":
             return GoogleTranslator(source='pt', target='en').translate(text)
@@ -165,156 +166,146 @@ def list_docs(vs_name: str):
     count = collection.count()
     print(f"[info] {count} chunks armazenados em {vs_name}")
 
-# -------------------------------------------------------------------
-# Pergunta
-# -------------------------------------------------------------------
+def extract_answer(resp):
+    if hasattr(resp, "output_text") and resp.output_text:
+        return resp.output_text.strip()
+
+    try:
+        for block in resp.output:
+            if block.get("type") == "message":
+                for item in block["content"]:
+                    if item["type"] == "output_text":
+                        return item["text"].strip()
+    except Exception:
+        pass
+
+    return None
+
 def ask(vs_name: str, question: str):
-    """
-    Consulta RAG local se a pergunta for sobre radiologia clínica, 
-    caso contrário, responde normalmente.
-    """
+    
+    global CHAT_HISTORY
     
     t_start = time.time()
 
-    # ----------------------------------------------------------------------
-    #Detecção de idioma
-    # ----------------------------------------------------------------------
-    t0 = time.time()
-    try:
-        lang = detect(question)
-    except Exception:
-        lang = "en"
-    time_spent = time.time() - t0
-    logger.info(f"→ Detecção de idioma: {lang} ({time_spent:.2f}s)")
+    # --------------------------------------------------------------
+    # Comando para limpar o histórico
+    # --------------------------------------------------------------
+    #isso pode desconsiderar, aqui era so pra debug, pra eu num ter que ficar so resetando
+    #o server pra limpar o hisotico
+    if question.strip().lower() in ['reset']:
+        CHAT_HISTORY = []
+        return "O histórico da conversa foi reiniciado"
 
-    # ----------------------------------------------------------------------
-    #Tradução PT→EN (se necessário)
-    # ----------------------------------------------------------------------
-    t1 = time.time()
-    q_en = auto_translate(question, "en") if lang != "en" else question
-    time_spent = time.time() - t1
-    logger.info(f"→ Tradução PT→EN: ({time_spent:.2f}s)")
+    logger.info(f"→ Pergunta recebida: {question[:50]}...")
 
-    t2 = time.time()
-    
-    # [NOVO PROMPT v3 - Mais inteligente]
-    classification_prompt = (
-        "Sua tarefa é classificar o texto do usuário em uma de duas categorias: 'RADIOLOGIA' ou 'GERAL'.\n"
-        "Responda APENAS com a palavra da categoria, e nada mais.\n\n"
-        "CATEGORIAS:\n"
-        "1. RADIOLOGIA: APENAS perguntas que solicitam interpretação, definição de achados de exames (TC, RM, Raio-X), ou que contenham termos médicos e detalhes clínicos de um laudo.\n"
-        "   Exemplos de RADIOLOGIA: 'O que é um nódulo pulmonar de 5mm?', 'Biótipo brevilíneo afeta o exame?', 'interprete esta tomografia', 'o que significa hipoatenuante no fígado?'\n"
-        "\n"
-        "2. GERAL: Qualquer outra coisa. Isso inclui saudações, perguntas genéricas, E TAMBÉM conversas 'sobre' o tópico de radiologia que NÃO contenham detalhes clínicos (meta-conversa).\n"
-        "   Exemplos GERAIS (Triviais): 'oi', 'tudo bem?', 'qual a capital da França?', 'explique este código python'\n"
-        "   Exemplos GERAIS (Meta-conversa): 'gostaria de fazer uma pergunta sobre radiologia', 'você entende de laudos?', 'o que você sabe sobre radiologia?', 'posso te enviar um exame?'\n"
-        "\n"
-        "--- INÍCIO DO TEXTO DO USUÁRIO ---\n"
-        f"{q_en}\n"
-        "--- FIM DO TEXTO DO USUÁRIO ---\n"
-        "\n"
-        "CATEGORIA (apenas uma palavra):"
+    t3 = time.time()
+    local_path = ensure_local_dir(vs_name)
+    collection = get_chroma_collection(vs_name)
+
+    # Criar embedding
+    emb_q = client.embeddings.create(
+        model="text-embedding-3-large",
+        input=question
+    ).data[0].embedding
+    time_spent = time.time() - t3
+    logger.info(f"→ Geração de embedding: {time_spent:.2f}s")
+
+    # Consultar ChromaDB
+    t4 = time.time()
+    results = collection.query(
+        query_embeddings=[emb_q],
+        n_results=4,
+        include=["documents", "metadatas"]
     )
-    
-    resp_classification = client.responses.create(
-        model=DEFAULT_MODEL,
-        input=[{"role": "user", "content": classification_prompt}],
-        temperature=0.0,
-        max_output_tokens=16
-    )
-    
-    classification = resp_classification.output_text.strip().upper()
-    time_spent = time.time() - t2
-    logger.info(f"→ Classificação: ({time_spent:.2f}s)")
+    time_spent = time.time() - t4
+    logger.info(f"→ Consulta ao ChromaDB: {time_spent:.2f}s")
 
-    # ----------------------------------------------------------------------
-    # Roteamento: RAG (Radiologia)
-    # ----------------------------------------------------------------------
-    
-    if "RADIOLOGIA" in classification:
-        t3 = time.time()
-        local_path = ensure_local_dir(vs_name)
-        collection = get_chroma_collection(vs_name)
+    if not results["documents"][0]:
+        return "Não encontrei informações relevantes sobre isso nos documentos de radiologia."
 
-        # Criar embedding
-        emb_q = client.embeddings.create(
-            model="text-embedding-3-large",
-            input=q_en
-        ).data[0].embedding
-        time_spent = time.time() - t3 # O tempo de embedding começa aqui (t3)
-        logger.info(f"→ Geração de embedding: {time_spent:.2f}s")
+    # Coletar fontes únicas
+    t_prompt = time.time() # Novo timer para montagem do prompt
+    seen = set()
+    sources = []
+    for meta in results["metadatas"][0]: 
+        src = f"{meta.get('source', 'desconhecido')} (p.{meta.get('page', '?')})"
+        if src not in seen:
+            seen.add(src)
+            sources.append(src)
 
-        # Consultar ChromaDB
-        t4 = time.time()
-        results = collection.query(
-            query_embeddings=[emb_q],
-            n_results=7,
-            include=["documents", "metadatas"]
-        )
-        time_spent = time.time() - t4
-        logger.info(f"→ Consulta ao ChromaDB: {time_spent:.2f}s")
+    context = "\n\n".join(results["documents"][0])
 
-        if not results["documents"][0]:
-            return "Não encontrei informações relevantes sobre isso nos documentos de radiologia."
-
-        # Coletar fontes únicas
-        t_prompt = time.time() # Novo timer para montagem do prompt
-        seen = set()
-        sources = []
-        for meta in results["metadatas"][0]: 
-            src = f"{meta.get('source', 'desconhecido')} (p.{meta.get('page', '?')})"
-            if src not in seen:
-                seen.add(src)
-                sources.append(src)
-
-        context = "\n\n".join(results["documents"][0])
-        prompt = (
-            "Você é um assistente médico especializado em radiologia e sempre deve responder em português.\n"
-            "REGRAS:\n"
-            "1. Responda APENAS com base nos trechos abaixo e inclua:\n"
-            "   FONTE:\n"
-            "   → Apenas uma fonte por linha, sem duplicar.\n"
-            "   Preserve medidas em milímetros exatamente como nos textos.\n\n"
-            f"{context}\n\n"
-            f"Pergunta: {q_en}\n\n"
-            f"FONTE:\n{chr(10).join(sources)}"
-        )
-        time_spent = time.time() - t_prompt # Usando o novo timer
-        logger.info(f"→ montagem do prompt: {time_spent:.2f}s")
-
-        t5 = time.time()
-        resp_final = client.responses.create(
-            model=DEFAULT_MODEL,
-            input=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_output_tokens=800
-        )
-        answer_en = resp_final.output_text.strip()
-        time_spent = time.time() - t5
-        logger.info(f"→ Resposta GPT (Radiologia): {time_spent:.2f}s")
-
-    else:
-        # Não é radiologia
-        t_geral = time.time()
+    # system_prompt = (
+    #     "Você é um assistente altamente especializado e sempre responde em português.\n"
+    #     "Use o histórico da conversa para manter coerência.\n"
+    #     "se os trechos abaixo não forem relevantes para a resposta não use-os e não cite 'FONTE' e responda com base no seu conhecimento sobre o assunto.\n"
+    #     "se os trechos forem relevantes siga a regra abaixo:\n"
+    #     "1. Responda APENAS com base nos trechos abaixo e inclua:\n"
+    #     "   FONTE:\n"
+    #     "   → Apenas uma fonte por linha, sem duplicar.\n"
+    #     "   Preserve medidas em milímetros exatamente como nos textos.\n\n"
+    #     f"{context}\n\n"
+    #     f"FONTE:\n{chr(10).join(sources)}\n"
+    #     "obs: lembre-se, se vc não usou os trechos para gerar a resposta não os cite."
         
-        general_prompt = (
-            "Você é um assistente prestativo. Responda a pergunta abaixo em português de forma completa e útil.\n\n"
-            f"Pergunta: {q_en}"
-        )
-        resp_general = client.responses.create(
-            model=DEFAULT_MODEL,
-            input=[{"role": "user", "content": general_prompt}],
-            temperature=0.7, 
-            max_output_tokens=800
-        )
-        answer_en = resp_general.output_text.strip()
-        time_spent = time.time() - t_geral
-        logger.info(f"→ Resposta GPT (Geral): {time_spent:.2f}s")
+    # )
 
-    total = time.time() - t_start
-    logger.info(f"# Tempo total: {total:.2f}s\n") # Adiciona uma linha em branco no log
-    
-    return answer_en
+    # llm_input = [{"role": "system", "content": system_prompt}] + CHAT_HISTORY + [
+    #     {"role": "user", "content": question}
+    # ]
+
+    system_prompt = (
+        "Você é o DeuChat, o assistente virtual especializado em radiologia da DeuLaudo.\n" 
+        "Você deve responder conforme (caso haja) exigências feitas nas perguntas acima ou (principalmente) na pergunta abaixo.\n"
+        "se utilizar os trechos abaixo, é terminantemente proibido que você: especule, invente, preveja, ou afirme algo que não tenha certeza\n"
+        "se os trechos abaixo não forem relevantes para a resposta não use-os e não cite 'FONTE' e responda com base no seu conhecimento sobre o assunto.\n"
+        "obs: lembre-se, se vc não usou os trechos para gerar a resposta não os cite.\n"
+        "REGRAS:\n"
+        "1. Sempre deve responder em português.\n"
+        "2. Responda APENAS com base nos trechos abaixo e inclua:\n"
+        "   FONTE:\n"
+        "   → Apenas uma fonte por linha, sem duplicar.\n"
+        "   Preserve medidas em milímetros exatamente como nos textos.\n\n"
+        "3. se você não utilizou as fotes para gerar a resposta não cite"
+        f"{context}\n\n"
+        f"FONTE:\n{chr(10).join(sources)}\n"
+        
+    )
+
+    llm_input = CHAT_HISTORY + [{"role": "system", "content": system_prompt}] + [
+        {"role": "user", "content": question}
+    ]
+
+    # Chamada
+    t5 = time.time()
+    resp_final = client.responses.create(
+        model=DEFAULT_MODEL,     
+        input=llm_input,
+        max_output_tokens=4000
+    )
+
+    print("DEBUG:", resp_final.model_dump())
+
+    answer = extract_answer(resp_final)
+    if not answer:
+        logger.error("→ Não consegui extrair texto do LLM.")
+        return "Ocorreu um erro ao processar a resposta do modelo. Tente novamente."
+
+    logger.info(f"→ Resposta GPT-5 obtida em {time.time() - t5:.2f}s")
+
+    # ----------------------------------------------------------------------
+    # Salva o histórico
+    # ----------------------------------------------------------------------
+    CHAT_HISTORY.append({"role": "user", "content": question})
+    CHAT_HISTORY.append({"role": "assistant", "content": answer})
+
+    if len(CHAT_HISTORY) > 10:
+        CHAT_HISTORY[:] = CHAT_HISTORY[-10:]
+
+    logger.info(f"→ Histórico salvo ({len(CHAT_HISTORY)} msgs)")
+
+    return answer
+
 
 # -------------------------------------------------------------------
 # Drop
