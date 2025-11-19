@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
+# -- coding: utf-8 --
 
 """
 cloud_rag_cli_local.py — RAG com ChromaDB
@@ -33,7 +33,7 @@ from deep_translator import GoogleTranslator
 # -------------------------------------------------------------------
 # Config
 # -------------------------------------------------------------------
-dotenv_path = Path(__file__).parent / ".env"
+dotenv_path = Path(_file_).parent / ".env"
 load_dotenv(dotenv_path=dotenv_path, override=True)
 
 DEFAULT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini")
@@ -113,7 +113,7 @@ def index_pdfs(docs_dir: Path, vs_name: str):
     local_path = ensure_local_dir(vs_name)
     collection = get_chroma_collection(vs_name)
 
-    pdfs = sorted(docs_dir.glob("**/*.pdf"))
+    pdfs = sorted(docs_dir.glob("*/.pdf"))
     if not pdfs:
         print(f"[warn] Nenhum PDF encontrado em {docs_dir}")
         return
@@ -135,12 +135,12 @@ def index_pdfs(docs_dir: Path, vs_name: str):
             )
             embeds = [d.embedding for d in resp.data]
 
-            ids = [f"{pdf.stem}_p{page_num}_{i}" for i in range(len(chunks))]
+            ids = [f"{pdf.stem}p{page_num}{i}" for i in range(len(chunks))]
             metas = [
                 {
                     "source": pdf.name,
                     "path": str(pdf),
-                    "page": page_num,   # 🔹 nova informação!
+                    "page": page_num,   
                     "chunk": i
                 }
                 for i in range(len(chunks))
@@ -220,20 +220,47 @@ def ask(vs_name: str, question: str):
     time_spent = time.time() - t4
     logger.info(f"→ Consulta ao ChromaDB: {time_spent:.2f}s")
 
-    if not results["documents"][0]:
-        return "Não encontrei informações relevantes sobre isso nos documentos de radiologia."
+    # if not results["documents"][0]:
+    #     return "Não encontrei informações relevantes sobre isso nos documentos de radiologia."
 
-    # Coletar fontes únicas
-    t_prompt = time.time() # Novo timer para montagem do prompt
-    seen = set()
-    sources = []
-    for meta in results["metadatas"][0]: 
-        src = f"{meta.get('source', 'desconhecido')} (p.{meta.get('page', '?')})"
-        if src not in seen:
-            seen.add(src)
-            sources.append(src)
+    # # Coletar fontes únicas
+    # t_prompt = time.time() 
+    # seen = set()
+    # sources = []
+    # for meta in results["metadatas"][0]: 
+    #     src = f"{meta.get('source', 'desconhecido')} (p.{meta.get('page', '?')})"
+    #     if src not in seen:
+    #         seen.add(src)
+    #         sources.append(src)
 
-    context = "\n\n".join(results["documents"][0])
+    # if results["documents"][0]:
+
+    #     # Coletar fontes únicas
+    #     t_prompt = time.time()
+    #     seen = set()
+    #     sources = []
+    #     for meta in results["metadatas"][0]: 
+    #         src = f"{meta.get('source', 'desconhecido')} (p.{meta.get('page', '?')})"
+    #         if src not in seen:
+    #             seen.add(src)
+    #             sources.append(src)
+
+    # context = "\n\n".join(results["documents"][0])
+
+    if results["documents"][0]:
+        seen = set()
+        sources = []
+
+        for meta in results["metadatas"][0]:
+            src = f"{meta.get('source','desconhecido')} (p.{meta.get('page','?')})"
+            if src not in seen:
+                seen.add(src)
+                sources.append(src)
+
+        context = "\n\n".join(results["documents"][0])
+        context += "\n\nFONTE:\n" + "\n".join(sources)
+    else:
+        context = ""
 
     # system_prompt = (
     #     "Você é um assistente altamente especializado e sempre responde em português.\n"
@@ -253,6 +280,7 @@ def ask(vs_name: str, question: str):
     # llm_input = [{"role": "system", "content": system_prompt}] + CHAT_HISTORY + [
     #     {"role": "user", "content": question}
     # ]
+    
 
     system_prompt = (
         "Você é o DeuChat, o assistente virtual especializado em radiologia da DeuLaudo.\n" 
@@ -267,19 +295,32 @@ def ask(vs_name: str, question: str):
         "   → Apenas uma fonte por linha, sem duplicar.\n"
         "   Preserve medidas em milímetros exatamente como nos textos.\n\n"
         "3. se você não utilizou as fotes para gerar a resposta não cite"
-        f"{context}\n\n"
+        #f"{context}\n\n"
         f"FONTE:\n{chr(10).join(sources)}\n"
         
     )
 
-    llm_input = CHAT_HISTORY + [{"role": "system", "content": system_prompt}] + [
+    # llm_input = CHAT_HISTORY + [{"role": "system", "content": system_prompt}] + [
+    #     {"role": "user", "content": question}
+    # ]
+    # llm_input = [
+    #     {"role": "system", "content": system_prompt},
+    # ] + CHAT_HISTORY + [
+    #     {"role": "user", "content": question}
+    # ]
+
+    llm_input = [
+        {"role": "system", "content": system_prompt},
+        {"role": "assistant", "content": context},
+    ] + CHAT_HISTORY + [
         {"role": "user", "content": question}
     ]
 
     # Chamada
     t5 = time.time()
     resp_final = client.responses.create(
-        model=DEFAULT_MODEL,     
+        model=DEFAULT_MODEL, 
+        temperature=0.0,    
         input=llm_input,
         max_output_tokens=4000
     )
@@ -291,7 +332,7 @@ def ask(vs_name: str, question: str):
         logger.error("→ Não consegui extrair texto do LLM.")
         return "Ocorreu um erro ao processar a resposta do modelo. Tente novamente."
 
-    logger.info(f"→ Resposta GPT-5 obtida em {time.time() - t5:.2f}s")
+    logger.info(f"→ Resposta GPT-4 obtida em {time.time() - t5:.2f}s")
 
     # ----------------------------------------------------------------------
     # Salva o histórico
@@ -357,5 +398,5 @@ def main():
     else:
         ap.print_help()
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
