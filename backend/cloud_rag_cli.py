@@ -33,7 +33,7 @@ from deep_translator import GoogleTranslator
 # -------------------------------------------------------------------
 # Config
 # -------------------------------------------------------------------
-dotenv_path = Path(_file_).parent / ".env"
+dotenv_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=dotenv_path, override=True)
 
 DEFAULT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini")
@@ -398,5 +398,5 @@ def main():
     else:
         ap.print_help()
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
