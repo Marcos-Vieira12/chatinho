@@ -290,7 +290,7 @@ def ask(vs_name: str, question: str):
         "obs: lembre-se, se vc não usou os trechos para gerar a resposta não os cite.\n"
         "REGRAS:\n"
         "1. Sempre deve responder em português.\n"
-        "2. Responda APENAS com base nos trechos abaixo e inclua:\n"
+        "2. Responda com base nos trechos abaixo e inclua:\n"
         "   FONTE:\n"
         "   → Apenas uma fonte por linha, sem duplicar.\n"
         "   Preserve medidas em milímetros exatamente como nos textos.\n\n"
