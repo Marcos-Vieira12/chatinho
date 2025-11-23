@@ -1,3 +1,5 @@
+
+torch --index-url https://download.pytorch.org/whl/cpu
 fastapi
 uvicorn
 openai
@@ -11,3 +13,10 @@ deep-translator
 numpy<2.0
 requests
 pymed
+#nova versão do RAG
+haystack-ai
+transformers
+accelerate
+tokenizers
+huggingface_hub
+FlagEmbedding>=1.2.10
